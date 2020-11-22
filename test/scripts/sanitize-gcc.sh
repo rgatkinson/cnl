@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 
-# Configure, build and run all tests with UBSan and MSan enabled, assuming a GCC toolchain
+# Configure, build and run all tests with UBSan and MSan enabled, assuming a Clang toolchain
 
 set -euo pipefail
 
-export CXX=g++
 PROJECT_DIR=$(
   cd "$(dirname "$0")"/../..
   pwd
 )
 
-"${PROJECT_DIR}/test/scripts/test-all.sh" \
-  -DCMAKE_TOOLCHAIN_FILE="${PROJECT_DIR}/test/cmake/toolchain/gcc.cmake" \
-  -DCNL_INT128=ON \
-  -DCNL_SANITIZE=ON \
-  "$@"
+"${PROJECT_DIR}/test/scripts/test.sh" \
+  --env CONAN_CMAKE_TOOLCHAIN_FILE="${PROJECT_DIR}/test/cmake/toolchain/gcc.cmake" \
+  --env CXX=g++ \
+  --env LSAN_OPTIONS=verbosity=1:log_threads=1 \
+  --options int128=True \
+  --options sanitize=True
