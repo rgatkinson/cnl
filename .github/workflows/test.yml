@@ -9,6 +9,7 @@ jobs:
   # Build and test many combinations on Linux/OS X using Conan
   posix-conan-test:
     strategy:
+      fail-fast: false
       matrix:
         name: [clang-11, osx-gcc-10, gcc-10, clang-5, gcc-5, gcc-7, armv7]
         include:
@@ -22,14 +23,14 @@ jobs:
             clang-tidy: clang-tidy
             cc: clang
             cxx: clang++
-            exceptions: "ON"
+            exceptions: "True"
             generator: "Ninja"
-            int128: "ON"
+            int128: "True"
             linux-container: johnmcfarlane/cnl_ci:clang-11-libcpp
             os-version: ubuntu-20.04
             std: 17
             stdlib: libc++
-            toolchain: clang-libc++.cmake
+            toolchain: clang-tidy-libc++.cmake
 
           # OS X
           - name: osx-gcc-10
@@ -40,9 +41,9 @@ jobs:
             build-type: Release
             cc: gcc-10
             cxx: g++-10
-            exceptions: "ON"
+            exceptions: "True"
             generator: "Ninja"
-            int128: "ON"
+            int128: "True"
             os-version: macos-10.15
             std: 20
             stdlib: libstdc++11
@@ -57,9 +58,9 @@ jobs:
             build-type: Release
             cc: gcc-10
             cxx: g++-10
-            exceptions: "ON"
+            exceptions: "True"
             generator: "Ninja"
-            int128: "ON"
+            int128: "True"
             linux-container: johnmcfarlane/cnl_ci:gcc-10
             os-version: ubuntu-20.04
             std: 20
@@ -75,9 +76,9 @@ jobs:
             build-type: Release
             cc: clang
             cxx: clang++
-            exceptions: "ON"
+            exceptions: "True"
             generator: "Ninja"
-            int128: "ON"
+            int128: "True"
             linux-container: johnmcfarlane/cnl_ci:clang-5-libstdcpp
             os-version: ubuntu-20.04
             std: 11
@@ -93,9 +94,9 @@ jobs:
             build-type: Release
             cc: gcc-5
             cxx: g++-5
-            exceptions: "ON"
+            exceptions: "True"
             generator: "Ninja"
-            int128: "ON"
+            int128: "True"
             linux-container: johnmcfarlane/cnl_ci:gcc-5
             os-version: ubuntu-20.04
             std: 11
@@ -107,8 +108,8 @@ jobs:
             cxx: g++-7
             cc: gcc-7
             version: "7"
-            exceptions: "OFF"
-            int128: "OFF"
+            exceptions: "False"
+            int128: "False"
             os: linux
             arch: x86_64
             build-type: Debug
@@ -129,9 +130,9 @@ jobs:
             build-type: Release
             cc: arm-linux-gnueabi-gcc-10
             cxx: arm-linux-gnueabi-g++-10
-            exceptions: "ON"
+            exceptions: "True"
             generator: "Ninja"
-            int128: "OFF"
+            int128: "False"
             linux-container: johnmcfarlane/cnl_ci:gcc-10
             os-version: ubuntu-20.04
             std: 20
@@ -149,11 +150,11 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install Brew packages
-      if: ( matrix.os == 'osx' )
-      run: brew install conan coreutils gcc@10 ninja
+      if: ${{ matrix.os == 'osx' }}
+      run: brew install conan gcc@10 ninja
 
     - name: Install ARMv7 packages
-      if: ( matrix.arch == 'armv7' )
+      if: ${{ matrix.arch == 'armv7' }}
       run: apt-get install --quiet --yes g++-10-arm-linux-gnueabi libboost-dev
 
     - name: Initialise Conan
@@ -170,42 +171,47 @@ jobs:
       run: |
         conan install \
           --build=missing \
-          $GITHUB_WORKSPACE
-
-    - name: Configure build system
-      run: |
-        cmake \
-          -DCMAKE_BUILD_TYPE=${{matrix.build-type}} \
-          -DCMAKE_CXX_STANDARD=${{matrix.std}} \
-          -DCMAKE_CXX_CLANG_TIDY=${{matrix.clang-tidy}} \
-          -DCMAKE_PROJECT_cnl_INCLUDE:FILEPATH=$(pwd)/conan_paths.cmake \
-          -DCMAKE_TOOLCHAIN_FILE:FILEPATH=$(pwd)/test/cmake/toolchain/${{matrix.toolchain}} \
-          -DCNL_INT128=${{matrix.int128}} \
-          -DCNL_EXCEPTIONS=${{matrix.exceptions}} \
-          -G "${{matrix.generator}}" \
+          --settings build_type=${{matrix.build-type}} \
+          --options int128=${{matrix.int128}} \
+          --options enable_exceptions=${{matrix.exceptions}} \
           $GITHUB_WORKSPACE
 
     - name: Build tests
-      run: cmake --build . -- -j $(nproc)
+      env:
+        CONAN_CMAKE_TOOLCHAIN_FILE: ${{github.workspace}}/test/cmake/toolchain/${{matrix.toolchain}}
+      run: |
+        conan build \
+          --build \
+          --configure \
+          $GITHUB_WORKSPACE
 
     - name: Test library
-      if: ( matrix.arch != 'armv7' )
-      run: ctest --output-on-failure --parallel $(nproc)
+      if: ${{ matrix.arch != 'armv7' }}
+      run: |
+        conan build \
+          --test \
+          $GITHUB_WORKSPACE
+
+    - name: Run benchmarks
+      if: ${{ name == clang-11 || name == gcc-10 }}
+      working-directory: ${{runner.workspace}}/build
+      run: test\benchmark\Release\test-benchmark.exe
 
   # Build and test on Windows using Conan
   windows-conan-test:
     runs-on: windows-2019
     strategy:
+      fail-fast: false
       matrix:
         arch: [x86_64, x86]
         include:
           - arch: x86_64
             cmake_arch: x64
-            exceptions: "ON"
+            exceptions: "True"
             msbuild_property: x64
           - arch: x86
             cmake_arch: Win32
-            exceptions: "OFF"
+            exceptions: "False"
             msbuild_property: win32
 
     steps:
@@ -222,11 +228,21 @@ jobs:
         conan profile update settings.compiler.version=16 default
 
     - name: Create build directory
+      env:
+        CONAN_CMAKE_TOOLCHAIN_FILE: $env:GITHUB_WORKSPACE/test/cmake/toolchain/clang-tidy.cmake
       run: mkdir ${{runner.workspace}}\build
 
     - name: Install dependencies
       working-directory: ${{runner.workspace}}/build
       run: conan install --build=missing --settings build_type=Release $env:GITHUB_WORKSPACE
+
+    - name: Build and run tests
+      run: |
+        conan build \
+          --build \
+          --configure \
+          --test \
+          $GITHUB_WORKSPACE
 
     - name: Configure build system
       working-directory: ${{runner.workspace}}/build
@@ -255,6 +271,7 @@ jobs:
   # Build and test latest on Linux using only CMake
   linux-cmake-test:
     strategy:
+      fail-fast: false
       matrix:
         compiler: [clang-head, gcc-head]
 
